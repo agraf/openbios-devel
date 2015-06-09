@@ -1003,7 +1003,7 @@ arch_of_init(void)
     /* Implementation of filll word (required by BootX) */
     bind_func("filll", ffilll);
 
-    bind_func("adler32", adler32);
+    bind_func("(adler32)", adler32);
     
     bind_func("platform-boot", boot);
     bind_func("(go)", go);

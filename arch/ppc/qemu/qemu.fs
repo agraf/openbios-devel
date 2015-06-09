@@ -93,3 +93,31 @@ variable keyboard-phandle 0 keyboard-phandle !
 :noname
   set-defaults
 ; PREPOST-initializer
+
+\ -------------------------------------------------------------------------
+\ Adler-32 wrapper
+\ -------------------------------------------------------------------------
+
+: adler32 ( adler buf len -- checksum )
+  \ Since Mac OS 9 is the only system using this word, we take this
+  \ opportunity to inject a copyright message that is necessary for the
+  \ system to boot.
+  " /" find-package if
+    " set-property" $find if
+      ( adler buf len phandle xt )
+      >r >r
+      " Copyright 1983-2001 Apple Computer, Inc. THIS MESSAGE FOR COMPATIBILITY ONLY"
+      encode-string " copyright"
+      r> r> execute
+    else
+      ." Can't find " type cr
+    then
+  then
+
+  " (adler32)" $find if
+    execute
+  else
+    3drop 0
+    ." Can't find" type cr
+  then
+;
