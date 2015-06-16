@@ -123,141 +123,173 @@ bootinfo_load(struct sys_info *info, const char *filename)
   <os-name>Debian/GNU Linux for PowerPC</os-name>
   <boot-script>boot &device;:\install\yaboot</boot-script>
   <icon size=64,64 color-space=3,3,2>
-
-  CHRP system bindings are described at:
-  http://playground.sun.com/1275/bindings/chrp/chrp1_7a.ps
 */
 
 void
 bootinfo_init_program(void)
 {
-	char *base;
-	int proplen;
+	char c;
+	char buf[128];
+	char *bootpath_prop, *bootpath, *directory, *device, *partition,
+		 *filename, *bootinfo, *bootscript;
+	int proplen, is_entity, is_script, is_tag, scriptvalid;
 	phandle_t chosen;
-	int tag, taglen, script, scriptlen, scriptvalid, entity, chrp;
-	char tagbuf[128], c;
-	char *device, *filename, *directory, *partition;
-	int current, size;
-	char *bootscript;
-        char *tmp;
-	char bootpath[1024];
-
-	/* Parse the boot script */
+	size_t filesize, scriptlen, scriptstart, scriptend, scriptind, buflen, current;
 
 	chosen = find_dev("/chosen");
-	tmp = get_property(chosen, "bootpath", &proplen);
-	memcpy(bootpath, tmp, proplen);
-	bootpath[proplen] = 0;
 
-	DPRINTF("bootpath %s\n", bootpath);
+	/* Copy a C string of the boot path */
+	bootpath_prop = get_property(chosen, "bootpath", &proplen);
+	bootpath = malloc((proplen + 1) * sizeof (*bootpath));
+	memcpy(bootpath, bootpath_prop, proplen);
+	bootpath[proplen] = '\0';
+
+	DPRINTF("bootpath: %s\n", bootpath);
 
 	device = get_device(bootpath);
 	partition = get_partition(bootpath);
 	filename = get_filename(bootpath, &directory);
 
 	feval("load-base");
-	base = (char*)cell2pointer(POP());
+	bootinfo = (char *)cell2pointer(POP());
 
 	feval("load-size");
-	size = POP();
+	filesize = (size_t)POP();
 
-	bootscript = malloc(size);
-	if (bootscript == NULL) {
-		DPRINTF("Can't malloc %d bytes\n", size);
-		return;
-	}
+	DPRINTF("filesize: %zu\n", filesize);
 
-	if (!is_bootinfo(base)) {
-		DPRINTF("Not a valid bootinfo memory image\n");
-                free(bootscript);
-		return;
-	}
-
-	chrp = 0;
-	tag = 0;
-	taglen = 0;
-	script = 0;
-	scriptvalid = 0;
+	scriptstart = 0;
+	scriptend = 0;
 	scriptlen = 0;
-	entity = 0;
+	buflen = 0;
+	is_entity = 0;
+	is_script = 0;
+	is_tag = 0;
+	scriptvalid = 0;
 	current = 0;
-	while (current < size) {
 
-		c = base[current++];
+	/* Find the length of the bootscript (scriptlen) */
+	while (current < filesize && bootinfo[current] != 0x04) {
+		c = bootinfo[current++];
 
 		if (c == '<') {
-			script = 0;
-			tag = 1;
-			taglen = 0;
-		} else if (c == '>') {
-			tag = 0;
-			tagbuf[taglen] = '\0';
-			if (strncasecmp(tagbuf, "chrp-boot", 9) == 0) {
-				chrp = 1;
-			} else if (chrp == 1) {
-				if (strncasecmp(tagbuf, "boot-script", 11) == 0) {
-					script = 1;
-					scriptlen = 0;
-				} else if (strncasecmp(tagbuf, "/boot-script", 12) == 0) {
-
-					script = 0;
-					bootscript[scriptlen] = '\0';
-
-					DPRINTF("got bootscript %s\n",
-						bootscript);
-
-					scriptvalid = -1;
-
+			is_script = 0;
+			is_tag = 1;
+			buflen = 0;
+		} else if (is_tag) {
+			if (c == '>') {
+				is_tag = 0;
+				buf[buflen] = '\0';
+				if (strncasecmp(buf, "boot-script", 11) == 0) {
+					is_script = 1;
+					scriptstart = current;
+				} else if (strncasecmp(buf, "/boot-script", 12) == 0) {
+					is_script = 0;
+					scriptend = current - 14;
+					scriptvalid = 1;
 					break;
-				} else if (strncasecmp(tagbuf, "/chrp-boot", 10) == 0)
+				}
+			} else {
+				buf[buflen++] = c;
+			}
+		} else if (is_script) {
+			if (is_entity) {
+				switch (c) {
+				case ';':
+					is_entity = 0;
+					buf[buflen] = '\0';
+					if (strncasecmp(buf, "lt", 2) == 0 ||
+							strncasecmp(buf, "gt", 2) == 0) {
+						scriptlen += 1;
+					} else if (strncasecmp(buf, "device", 6) == 0) {
+						scriptlen += strlen(device);
+					} else if (strncasecmp(buf, "partition", 9) == 0) {
+						scriptlen += strlen(partition);
+					} else if (strncasecmp(buf, "directory", 9) == 0) {
+						scriptlen += strlen(directory);
+					} else if (strncasecmp(buf, "filename", 8) == 0) {
+						scriptlen += strlen(filename);
+					} else if (strncasecmp(buf, "full-path", 9) == 0) {
+						scriptlen += strlen(bootpath);
+					} else {
+						scriptlen += buflen + 2;
+					}
 					break;
+				case '&':
+					DPRINTF("nested entity");
+					return;
+				default:
+					buf[buflen++] = c;
+					break;
+				}
+			} else {
+				scriptlen += 1;
 			}
-		} else if (tag && taglen < sizeof(tagbuf)) {
-			tagbuf[taglen++] = c;
-		} else if (script && c == '&') {
-			entity = 1;
-			taglen = 0;
-		} else if (entity && c ==';') {
-			entity = 0;
-			tagbuf[taglen] = '\0';
-			if (strncasecmp(tagbuf, "lt", 2) == 0) {
-				bootscript[scriptlen++] = '<';
-			} else if (strncasecmp(tagbuf, "gt", 2) == 0) {
-				bootscript[scriptlen++] = '>';
-			} else if (strncasecmp(tagbuf, "device", 6) == 0) {
-				strcpy(bootscript + scriptlen, device);
-				scriptlen += strlen(device);
-			} else if (strncasecmp(tagbuf, "partition", 9) == 0) {
-				strcpy(bootscript + scriptlen, partition);
-				scriptlen += strlen(partition);
-			} else if (strncasecmp(tagbuf, "directory", 9) == 0) {
-				strcpy(bootscript + scriptlen, directory);
-				scriptlen += strlen(directory);
-			} else if (strncasecmp(tagbuf, "filename", 8) == 0) {
-				strcpy(bootscript + scriptlen, filename);
-				scriptlen += strlen(filename);
-			} else if (strncasecmp(tagbuf, "full-path", 9) == 0) {
-				strcpy(bootscript + scriptlen, bootpath);
-				scriptlen += strlen(bootpath);
-			} else { /* unknown, keep it */
-				bootscript[scriptlen] = '&';
-				strcpy(bootscript + scriptlen + 1, tagbuf);
-				scriptlen += taglen + 1;
-				bootscript[scriptlen] = ';';
-				scriptlen++;
-			}
-		} else if (entity && taglen < sizeof(tagbuf)) {
-			tagbuf[taglen++] = c;
-		} else if (script && scriptlen < size) {
-			bootscript[scriptlen++] = c;
+		} else if (c == '&') {
+			is_entity = 1;
+			buflen = 0;
 		}
 	}
 
-	/* If the payload is bootinfo then we execute it immediately */
-	if (scriptvalid) {
-		DPRINTF("bootscript: %s\n", bootscript);
-		feval(bootscript);
+	if (!scriptvalid) {
+		DPRINTF("Unable to parse bootscript.\n");
+		return;
 	}
-	else
-		DPRINTF("Unable to parse bootinfo bootscript\n");
+
+	bootscript = malloc(scriptlen * sizeof *bootscript);
+
+	is_entity = 0;
+	scriptind = 0;
+	current = scriptstart;
+
+	/* Copy the bootscript and translate entities */
+	while (current < scriptend) {
+		c = bootinfo[current++];
+
+		if (c == '\r') c = '\n';
+		putchar(c);
+
+		if (is_entity) {
+			if (c == ';') {
+				is_entity = 0;
+				buf[buflen] = '\0';
+				if (strncasecmp(buf, "lt", 2) == 0) {
+					bootscript[scriptind++] = '<';
+				} else if (strncasecmp(buf, "gt", 2) == 0) {
+					bootscript[scriptind++] = '>';
+				} else if (strncasecmp(buf, "device", 6) == 0) {
+					strcpy(bootscript + scriptind, device);
+					scriptind += strlen(device);
+				} else if (strncasecmp(buf, "partition", 9) == 0) {
+					strcpy(bootscript + scriptind, partition);
+					scriptind += strlen(partition);
+				} else if (strncasecmp(buf, "directory", 9) == 0) {
+					strcpy(bootscript + scriptind, directory);
+					scriptind += strlen(directory);
+				} else if (strncasecmp(buf, "filename", 8) == 0) {
+					strcpy(bootscript + scriptind, filename);
+					scriptind += strlen(filename);
+				} else if (strncasecmp(buf, "full-path", 9) == 0) {
+					strcpy(bootscript + scriptind, bootpath);
+					scriptind += strlen(bootpath);
+				} else {
+					bootscript[scriptind++] = '&';
+					strcpy(bootscript + scriptind, buf);
+					scriptind += buflen;
+					bootscript[scriptind++] = ';';
+				}
+			} else {
+				buf[buflen++] = c;
+			}
+		} else if (c == '&') {
+			is_entity = 1;
+			buflen = 0;
+
+		} else {
+			bootscript[scriptind++] = c;
+		}
+	}
+	bootscript[scriptlen] = '\0';
+
+	feval(bootscript);
 }
