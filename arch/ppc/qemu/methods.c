@@ -164,13 +164,16 @@ DECLARE_UNNAMED_NODE( mmu, INSTALL_OPEN, 0 );
 DECLARE_NODE( mmu_ciface, 0, 0, "+/openprom/client-services" );
 
 
-/* ( phys size align --- base ) */
+/* ( [phys] size align --- base ) */
 static void
 mem_claim( void )
 {
 	ucell align = POP();
 	ucell size = POP();
-	ucell phys = POP();
+	ucell phys = -1;
+	if (!align)
+		phys = POP();
+	
 	ucell ret = ofmem_claim_phys( phys, size, align );
 
 	if( ret == -1 ) {
@@ -188,14 +191,17 @@ mem_release( void )
 	POP(); POP();
 }
 
-/* ( phys size align --- base ) */
+/* ( [virt] size align --- base ) */
 static void
 mmu_claim( void )
 {
 	ucell align = POP();
 	ucell size = POP();
-	ucell phys = POP();
-	ucell ret = ofmem_claim_virt( phys, size, align );
+	ucell virt = -1;
+	if (!align)
+		virt = POP();
+	
+	ucell ret = ofmem_claim_virt( virt, size, align );
 
 	if( ret == -1 ) {
 		printk("MMU: CLAIM failure\n");
