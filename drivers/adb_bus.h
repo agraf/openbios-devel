@@ -96,6 +96,7 @@ static inline int adb_reg_set (adb_dev_t *dev, uint8_t reg,
     return adb_cmd(dev, ADB_LISTEN, reg, buf, len);
 }
 
+#define DEBUG_ADB
 #ifdef DEBUG_ADB
 #define ADB_DPRINTF(fmt, args...) \
 do { printk("ADB - %s: " fmt, __func__ , ##args); } while (0)

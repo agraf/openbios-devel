@@ -144,8 +144,15 @@ static int cuda_adb_req (void *host, const uint8_t *snd_buf, int len,
  //   CUDA_DPRINTF("len: %d %02x\n", len, snd_buf[0]);
     len = cuda_request(host, ADB_PACKET, snd_buf, len, buffer);
     if (len > 1 && buffer[0] == ADB_PACKET) {
-        pos = buffer + 2;
-        len -= 2;
+        if ((len > 2) && (buffer[2] == snd_buf[0])) {
+            /* New QEMU version with fixed cuda model */
+            pos = buffer + 3;
+            len -= 3;
+        } else {
+            /* Old QEMU version with broken cuda model */
+            pos = buffer + 2;
+            len -= 2;
+        }
     } else {
         pos = buffer + 1;
         len = -1;
